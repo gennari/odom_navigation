@@ -12,39 +12,35 @@ namespace pid
 
     public:
 
-      double curr_err;
-
       PID()
       {
-        curr_err = 0;
         int_err = 0;
-        old_err=0;
       }
 
       ~PID(){};
 
 
-      void paramInit(double k_p, double k_d, double k_i, double d_T)
+      void paramInit(double k_p, double k_d, double k_i)
       {
         k_prop = k_p;
         k_der = k_d;
         k_int = k_i;
-        dT = d_T;
       }
 
-      inline double getCommand(double error, double error_dot)
+      inline double getCommand(double error, double error_dot, double dT)
       {
-        int_err = old_err + dT*error;
+
+        int_err = int_err + dT*error;
+
         windupControl();
-        old_err = error;
+
         return k_prop*error + k_der*error_dot + k_int*int_err;
       } 
 
     private:
 
       double k_prop, k_der, k_int;
-      double int_err,old_err;
-      double dT, T_old, T_now;
+      double int_err;
       double windup_upper, windup_slower;
 
       inline void windupControl()
@@ -57,3 +53,4 @@ namespace pid
   };
 
 }
+
