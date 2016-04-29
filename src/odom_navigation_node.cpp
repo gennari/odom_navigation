@@ -25,7 +25,7 @@ protected:
     nav_msgs::Odometry pose_,old_pose;
     geometry_msgs::Twist velocity;
     bool _have_goal;
-    float alpha,tv_kp,tv_kd,tv_ki,rv_kp,rv_kd,rv_ki,_max_tv,_max_rv,_tresh;
+    float alpha,tv_kp,tv_kd,tv_ki,rv_kp,rv_kd,rv_ki,_max_tv,_max_rv,_tresh,delta_t;
     pid::PID pid_x_, pid_y_;
     ros::Publisher cmd_vel_pub;
 ros::Subscriber pose_sub_,goal_sub;
@@ -52,13 +52,13 @@ public:
         pose_sub_ = nh_.subscribe("/odom", 1, &OdomAction::odometryCallback,this);
         goal_sub =  nh_.subscribe("move_base_simple/goal", 2, &OdomAction::setGoalCallback, this);
         cmd_vel_pub = nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
-        nh_.param("tv_kp", tv_kp, 2.0f);
-        nh_.param("tv_kd", tv_kd, 1.0f);
-        nh_.param("tv_ki", tv_ki, 1.0f);
+        nh_.param("tv_kp", tv_kp, 1.0f);
+        nh_.param("tv_kd", tv_kd, 0.5f);
+        nh_.param("tv_ki", tv_ki, 0.2f);
 
-        nh_.param("rv_kp", rv_kp, 0.5f);
-        nh_.param("rv_kd", rv_kd, 0.2f);
-        nh_.param("rv_ki", rv_ki, 1.0f);
+        nh_.param("rv_kp", rv_kp, 0.1f);
+        nh_.param("rv_kd", rv_kd, 0.1f);
+        nh_.param("rv_ki", rv_ki, 0.1f);
 
         nh_.param("max_rv", _max_rv, 1.0f);
         nh_.param("max_tv", _max_tv, 1.0f);
@@ -110,7 +110,7 @@ public:
 
          ROS_INFO("SETTING POSE X: %f Y: %f THETA: %f",msg.pose.position.x,msg.pose.position.y,tf::getYaw(msg.pose.orientation));
 
-        //listener->transformPose("/base_link",ros::Time(0),msg,msg.header.frame_id,goal_b);
+        listener->transformPose("/odom",ros::Time(0),msg,msg.header.frame_id,goal_b);
          goal_=msg;
         ROS_INFO("SET POSE X: %f Y: %f THETA: %f",msg.pose.position.x,msg.pose.position.y,tf::getYaw(msg.pose.orientation));
         _have_goal=true;
@@ -121,10 +121,19 @@ public:
             if (_have_goal){
                 listener->transformPose("/base_link",ros::Time(0),goal_,goal_.header.frame_id,goal_b);
 
+                ROS_INFO("ANGLE: %f",atan2(goal_b.pose.position.y,goal_b.pose.position.x)*180/M_PI);
 
+                float des_yaw = atan2(goal_b.pose.position.y,goal_b.pose.position.x)*180/M_PI;
 
-                float tv = pid_x_.getCommand(goal_b.pose.position.x, velocity.linear.x,0.005);
-                float rv = pid_y_.getCommand(goal_b.pose.position.y,velocity.angular.z,0.005);
+                float tv=0;
+		float rv=0;
+		if(fabs(des_yaw)<=5){
+			tv= pid_x_.getCommand(goal_b.pose.position.x, velocity.linear.x,delta_t);		
+		}
+		if(fabs(des_yaw)>=1){		
+                	rv = pid_y_.getCommand(des_yaw,velocity.angular.z,delta_t);
+		}
+
 
 
                 geometry_msgs::Twist cmd_vel_;
@@ -139,6 +148,7 @@ public:
                     tv*=scale;
                     rv*=scale;
                 }
+
                 cmd_vel_.linear.x = tv;
                 cmd_vel_.angular.z = rv;
 
@@ -168,15 +178,13 @@ public:
     {       pose_ = *msg;
             // transform  point.
             geometry_msgs::PoseStamped in,out;
-                in.header=old_pose.header;
-                    in.pose=old_pose.pose.pose;
-
-                        listener->transformPose("/base_link",ros::Time(0),in,"/odom",out);
-
-                            velocity.linear.x=alpha*velocity.linear.x+(1-alpha)*(-1*out.pose.position.x)/(old_pose.header.stamp-pose_.header.stamp).toSec();
-                                velocity.angular.z=alpha*velocity.angular.z+(1-alpha)*(-1*tf::getYaw(out.pose.orientation))/(old_pose.header.stamp-pose_.header.stamp).toSec();
-
-                                    old_pose=pose_;
+            in.header=old_pose.header;
+            in.pose=old_pose.pose.pose;
+            listener->transformPose("/base_link",ros::Time(0),in,"/odom",out);
+            delta_t=(old_pose.header.stamp-pose_.header.stamp).toSec();
+            velocity.linear.x=alpha*velocity.linear.x+(1-alpha)*(-1*out.pose.position.x)/delta_t;
+            velocity.angular.z=alpha*velocity.angular.z+(1-alpha)*(-1*tf::getYaw(out.pose.orientation))/delta_t;
+            old_pose=pose_;
     }
 
 };
