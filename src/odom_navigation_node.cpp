@@ -25,7 +25,7 @@ protected:
     nav_msgs::Odometry pose_,old_pose;
     geometry_msgs::Twist velocity;
     bool _have_goal;
-    float alpha,tv_kp,tv_kd,tv_ki,rv_kp,rv_kd,rv_ki,_max_tv,_max_rv;
+    float alpha,tv_kp,tv_kd,tv_ki,rv_kp,rv_kd,rv_ki,_max_tv,_max_rv,_tresh;
     pid::PID pid_x_, pid_y_;
     ros::Publisher cmd_vel_pub;
 ros::Subscriber pose_sub_,goal_sub;
@@ -52,17 +52,20 @@ public:
         pose_sub_ = nh_.subscribe("/odom", 1, &OdomAction::odometryCallback,this);
         goal_sub =  nh_.subscribe("move_base_simple/goal", 2, &OdomAction::setGoalCallback, this);
         cmd_vel_pub = nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
-        nh_.param("/tv/kp", tv_kp, 1.0f);
-        nh_.param("/tv/kd", tv_kd, 1.0f);
-        nh_.param("/tv/ki", tv_ki, 1.0f);
+        nh_.param("tv_kp", tv_kp, 2.0f);
+        nh_.param("tv_kd", tv_kd, 1.0f);
+        nh_.param("tv_ki", tv_ki, 1.0f);
 
-        nh_.param("/rv/kp", rv_kp, 0.5f);
-        nh_.param("/rv/kd", rv_kd, 0.2f);
-        nh_.param("/rv/ki", rv_ki, 1.0f);
+        nh_.param("rv_kp", rv_kp, 0.5f);
+        nh_.param("rv_kd", rv_kd, 0.2f);
+        nh_.param("rv_ki", rv_ki, 1.0f);
 
         nh_.param("max_rv", _max_rv, 1.0f);
         nh_.param("max_tv", _max_tv, 1.0f);
+	nh_.param("tresh", _tresh, 0.001f);
 
+           
+	ROS_INFO("_tresh:=%f",_tresh);
         //ros::spin();
 
         _have_goal=false;
@@ -140,9 +143,10 @@ public:
                 cmd_vel_.angular.z = rv;
 
                 cmd_vel_pub.publish(cmd_vel_);
-
-                if( ((pose_.pose.pose.position.x- goal_.pose.position.x)*(pose_.pose.pose.position.x- goal_.pose.position.x) +
-                     (pose_.pose.pose.position.y- goal_.pose.position.y)*(pose_.pose.pose.position.y- goal_.pose.position.y)) <= 0.1 )
+		float distance=((pose_.pose.pose.position.x- goal_.pose.position.x)*(pose_.pose.pose.position.x- goal_.pose.position.x) +
+                     (pose_.pose.pose.position.y- goal_.pose.position.y)*(pose_.pose.pose.position.y- goal_.pose.position.y));
+		ROS_INFO("DISTANCE: %f",distance);
+                if( distance<= _tresh )
                 {
 
                     ROS_INFO("reached");
