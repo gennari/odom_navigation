@@ -24,11 +24,11 @@ protected:
     geometry_msgs::PoseStamped goal_,goal_b;
     nav_msgs::Odometry pose_,old_pose;
     geometry_msgs::Twist velocity;
-    bool _have_goal;
-    float alpha,tv_kp,tv_kd,tv_ki,rv_kp,rv_kd,rv_ki,_max_tv,_max_rv,_tresh,delta_t;
+    bool _have_goal, _pure_rotation;
+    double alpha,tv_kp,tv_kd,tv_ki,rv_kp,rv_kd,rv_ki,_max_tv,_max_rv,_tresh,delta_t;
     pid::PID pid_x_, pid_y_;
     ros::Publisher cmd_vel_pub;
-ros::Subscriber pose_sub_,goal_sub;
+    ros::Subscriber pose_sub_,goal_sub;
 public:
 
     OdomAction(std::string name) :
@@ -52,24 +52,25 @@ public:
         pose_sub_ = nh_.subscribe("/odom", 1, &OdomAction::odometryCallback,this);
         goal_sub =  nh_.subscribe("move_base_simple/goal", 2, &OdomAction::setGoalCallback, this);
         cmd_vel_pub = nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
-        nh_.param("tv_kp", tv_kp, 1.0f);
-        nh_.param("tv_kd", tv_kd, 0.5f);
-        nh_.param("tv_ki", tv_ki, 0.2f);
+        nh_.param("tv_kp", tv_kp, 1.0);
+        nh_.param("tv_kd", tv_kd, 0.5);
+        nh_.param("tv_ki", tv_ki, 0.2);
 
-        nh_.param("rv_kp", rv_kp, 0.1f);
-        nh_.param("rv_kd", rv_kd, 0.1f);
-        nh_.param("rv_ki", rv_ki, 0.1f);
+        nh_.param("rv_kp", rv_kp, 0.1);
+        nh_.param("rv_kd", rv_kd, 0.1);
+        nh_.param("rv_ki", rv_ki, 0.1);
 
-        nh_.param("max_rv", _max_rv, 1.0f);
-        nh_.param("max_tv", _max_tv, 1.0f);
-	nh_.param("tresh", _tresh, 0.001f);
+        nh_.param("max_rv", _max_rv, 1.0);
+        nh_.param("max_tv", _max_tv, 0.3);
+	nh_.param("tresh", _tresh, 0.001);
 
            
 	ROS_INFO("_tresh:=%f",_tresh);
+	ROS_INFO("_max_tv:=%f",_max_tv);
         //ros::spin();
 
         _have_goal=false;
-
+  	 _pure_rotation=false;
 
         pid_x_.paramInit(tv_kp,tv_kd,tv_ki);
         pid_y_.paramInit(rv_kp,rv_kd,rv_ki);
@@ -87,9 +88,11 @@ public:
 
         //geometry_msgs::PoseStampedConstPtr  ps_ptr (new geometry_msgs::PoseStamped(ps));
         _action_result="";
+
         setGoalCallback(ps);
         move_base_msgs::MoveBaseFeedback feed;
         ros::Rate r(10); // 10 hz
+
         while(_action_result=="" && _as.isActive()){
 
 
@@ -103,17 +106,17 @@ public:
             _as.setAborted(move_base_msgs::MoveBaseResult(), _action_result);
         }
 
-        _as.setSucceeded(move_base_msgs::MoveBaseResult(), "Goal reached.");
 
     }
     void setGoalCallback(const geometry_msgs::PoseStamped& msg) {
 
          ROS_INFO("SETTING POSE X: %f Y: %f THETA: %f",msg.pose.position.x,msg.pose.position.y,tf::getYaw(msg.pose.orientation));
 
-        listener->transformPose("/odom",ros::Time(0),msg,msg.header.frame_id,goal_b);
-         goal_=msg;
-        ROS_INFO("SET POSE X: %f Y: %f THETA: %f",msg.pose.position.x,msg.pose.position.y,tf::getYaw(msg.pose.orientation));
+        listener->transformPose("/odom",ros::Time(0),msg,msg.header.frame_id,goal_);
+         //goal_=msg;
+        ROS_INFO("SET POSE X: %f Y: %f THETA: %f",goal_.pose.position.x,goal_.pose.position.y,tf::getYaw(msg.pose.orientation));
         _have_goal=true;
+	_pure_rotation=false;
     }
     void run(){
         ros::Rate r(10);
@@ -121,10 +124,15 @@ public:
             if (_have_goal){
                 listener->transformPose("/base_link",ros::Time(0),goal_,goal_.header.frame_id,goal_b);
 
-                ROS_INFO("ANGLE: %f",atan2(goal_b.pose.position.y,goal_b.pose.position.x)*180/M_PI);
+                
 
-                float des_yaw = atan2(goal_b.pose.position.y,goal_b.pose.position.x)*180/M_PI;
-
+                float des_yaw;
+		if(_pure_rotation){
+			des_yaw=tf::getYaw(goal_b.pose.orientation)*180/M_PI;
+		}else{
+			des_yaw = atan2(goal_b.pose.position.y,goal_b.pose.position.x)*180/M_PI;
+		}
+		//ROS_INFO("ANGLE: %f",des_yaw);
                 float tv=0;
 		float rv=0;
 		if(fabs(des_yaw)<=5){
@@ -155,18 +163,28 @@ public:
                 cmd_vel_pub.publish(cmd_vel_);
 		float distance=((pose_.pose.pose.position.x- goal_.pose.position.x)*(pose_.pose.pose.position.x- goal_.pose.position.x) +
                      (pose_.pose.pose.position.y- goal_.pose.position.y)*(pose_.pose.pose.position.y- goal_.pose.position.y));
-		ROS_INFO("DISTANCE: %f",distance);
+		
                 if( distance<= _tresh )
-                {
+                {   
+		    //angle=tf::getYaw(pose_.pose.pose.orientation)-tf::getYaw(goal_b.pose.orientation);
+		/*    tf::Quaternion my,g;
+		    tf::quaternionMsgToTF(pose_.pose.pose.orientation,my);
+		    tf::quaternionMsgToTF(goal_b.pose.orientation,g);
+ 		    float a =my.angleShortestPath(g);
+		    ROS_INFO("DISTANCE: %f",fabs(a));*/
+		    if(fabs(tf::getYaw(goal_b.pose.orientation)*180/M_PI)<=2){
+		            ROS_INFO("reached");
+		            _action_result="SUCCEEDED";
+		            _have_goal=false;
+			    _pure_rotation=false;
+		            cmd_vel_.linear.x = 0;
+		            cmd_vel_.angular.z = 0;
 
-                    ROS_INFO("reached");
-                    _action_result="SUCCEEDED";
-                    _have_goal=false;
-                    cmd_vel_.linear.x = 0;
-                    cmd_vel_.angular.z = 0;
-
-                    cmd_vel_pub.publish(cmd_vel_);
-
+		            cmd_vel_pub.publish(cmd_vel_);
+		   }else{
+			//ROS_INFO("PURE_ROTATION");
+			_pure_rotation=true;
+		   }
                 }
             }
             r.sleep();
