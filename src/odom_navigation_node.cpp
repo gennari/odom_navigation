@@ -83,7 +83,7 @@ public:
 
     void executeCB(const move_base_msgs::MoveBaseGoalConstPtr& goal)
     {
-
+	ROS_ERROR("ACTION CALLED");
         geometry_msgs::PoseStamped ps = goal->target_pose;
 
         //geometry_msgs::PoseStampedConstPtr  ps_ptr (new geometry_msgs::PoseStamped(ps));
@@ -94,7 +94,15 @@ public:
         ros::Rate r(10); // 10 hz
 
         while(_action_result=="" && _as.isActive()){
-
+	    // check that preempt has not been requested by the client
+	      if (_as.isPreemptRequested() || !ros::ok())
+	      {
+		ROS_INFO("Preempted");
+		// set the action state to preempted
+		_action_result = "CANCELLED";
+		_have_goal=false;
+		break;
+	      }
 
             r.sleep();
             _as.publishFeedback(feed);
